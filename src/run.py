@@ -11,18 +11,24 @@ from cosmology.compat.camb import Cosmology
 import glass
 import glass.ext.camb
 
+from src.lightcone import ShellProjector
+
 # creating a numpy random number generator for sampling
 rng = np.random.default_rng(seed=42)
 
 @dataclass
 class Config:
     cosmo_dict: dict
+    boxsize: float
+    zbox: float
     nside: int
     lmax: int
     zmin: float
     zmax: float
     dx: float
     window_type: str
+    snap_input: str
+    map_output: str
 
 def z2d(z, Om):
     Ol = 1 - Om
@@ -100,8 +106,10 @@ def gen_lognormal_fields(config:Config):
 
     return matter, zb
 
-def get_replaced_zs(zb, zctr, boxsize, Om):
-
+def get_replaced_zs(zb, config:Config):
+    zctr = config.zbox
+    Om   = config.cosmo_dict['Omega_M']
+    boxsize = config.boxsize
     distctr = z2d(zctr, Om)
     dmin_box = max(0.0, distctr - boxsize / 2.0)
     dmax_box = distctr + boxsize / 2.0
@@ -119,6 +127,33 @@ def get_replaced_zs(zb, zctr, boxsize, Om):
 
     return zb[imin:imax + 1]
 
+def make_mass_shells(zb, config:Config):
+    Om = config.cosmo_dict['Omega_M']
+    zctr = config.zbox
+    distance_tbr = z2d(zb, Om)
+    distance_box = z2d(zctr, Om)
+    distance_ctr = distance_tbr - distance_box
+    distance_interval = distance_ctr[1:] - distance_ctr[:-1]
+    distance_edges = distance_ctr - distance_interval/2.0
+    distance_edges = np.append(distance_edges, distance_ctr[-1]+distance_interval[-1]/2.0)
+    boxsize = config.boxsize
+    nside = config.nside
+    projector = ShellProjector.periodic(
+        distance_edges,
+        nside=nside,
+        boxsize=boxsize,
+        observer=(0,0,0),
+        threads=32
+    )
+
+    snap_input = config.snap_input
+    map_output = config.map_output
+    positions = np.load(snap_input)
+    projector.add(positions)
+    np.save(map_output, projector.maps)
+
+    return
+
 
 if __name__ == "__main__":
     example_config = Config(
@@ -130,9 +165,15 @@ if __name__ == "__main__":
             'sigma8': 0.831
         },
         nside = 1024,
+        boxsize=1000.0,
+        zbox=0.3,
         lmax=1000,
         zmin = 0.0,
         zmax = 1.0,
         dx = 200.0,
-        window_type='tophat'
+        window_type='tophat',
+        snap_input='tests/tmp_pos.npy',
+        map_output='tests/tmp_map.npy'
     )
+
+    
