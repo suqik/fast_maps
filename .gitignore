@@ -1,3 +1,6 @@
 .ipynb_checkpoints
 .vscode
 tests/tmp_pos.npy
+tests/tmp_map.npy
+src/__pycache__
+*ipynb
