@@ -2,6 +2,7 @@ import healpy as hp
 import matplotlib.pyplot as plt
 import numpy as np
 from dataclasses import dataclass
+import datetime
 
 # uses the CAMB cosmology which produced the cls
 import camb
@@ -11,6 +12,8 @@ from cosmology.compat.camb import Cosmology
 import glass
 import glass.ext.camb
 
+import sys
+sys.path.append('/home/suc/Projects/fast_maps/')
 from src.lightcone import ShellProjector
 
 # creating a numpy random number generator for sampling
@@ -74,7 +77,7 @@ def gen_lognormal_fields(config:Config):
 
     pars, cosmo = get_cosmo_instance(cosmo_dict)
 
-    zb = glass.distance_grid(cosmo, zmin, zmax, dx)
+    zb = glass.distance_grid(cosmo, zmin, zmax, dx=dx)
 
     match window_type:
         case 'tophat':
@@ -88,11 +91,14 @@ def gen_lognormal_fields(config:Config):
             ncorr = 3
 
     print("Computing angular matter power spectra ... ", end='', flush=True)
+    start = datetime.datetime.now()
 
     cls = glass.ext.camb.matter_cls(pars, lmax, shells)
 
     cls = glass.discretized_cls(cls, nside=nside, lmax=lmax)
 
+    end = datetime.datetime.now()
+    calc_time = end - start
     print('Done.', flush=True)
 
     # set up lognormal fields for simulation
@@ -103,6 +109,8 @@ def gen_lognormal_fields(config:Config):
 
     # this generator will yield the matter fields in each shell
     matter = glass.generate(fields, gls, nside, ncorr=ncorr, rng=rng)
+
+    print("Cl calculation time: {}".format(calc_time))
 
     return matter, zb
 
@@ -130,14 +138,18 @@ def get_replaced_zs(zb, config:Config):
 def make_mass_shells(zb, config:Config):
     Om = config.cosmo_dict['Omega_M']
     zctr = config.zbox
-    distance_tbr = z2d(zb, Om)
-    distance_box = z2d(zctr, Om)
-    distance_ctr = distance_tbr - distance_box
-    distance_interval = distance_ctr[1:] - distance_ctr[:-1]
-    distance_edges = distance_ctr - distance_interval/2.0
-    distance_edges = np.append(distance_edges, distance_ctr[-1]+distance_interval[-1]/2.0)
     boxsize = config.boxsize
     nside = config.nside
+
+    distance_tbr = np.asarray([z2d(izb, Om) for izb in zb])
+    distance_box = z2d(zctr, Om) 
+    distance_ctr = distance_tbr - distance_box + boxsize/2.0
+    distance_edges = 0.5*(distance_ctr[1:] + distance_ctr[:-1])
+    start = distance_ctr[0] - 0.5*(distance_ctr[1] - distance_ctr[0])
+    end   = distance_ctr[-1] + 0.5*(distance_ctr[-1] - distance_ctr[-2])
+    distance_edges = np.append(start, np.append(distance_edges, end))
+    print(distance_ctr)
+
     projector = ShellProjector.periodic(
         distance_edges,
         nside=nside,
@@ -148,9 +160,30 @@ def make_mass_shells(zb, config:Config):
 
     snap_input = config.snap_input
     map_output = config.map_output
+    print("Load snapshot ... ", flush=True, end='')
+    start = datetime.datetime.now()
+
     positions = np.load(snap_input)
+
+    end = datetime.datetime.now()
+    loadtime = end - start
+    print("Done.", flush=True)
+
+    print("Generating shells ... ", flush=True, end='')
+    start = datetime.datetime.now()
+
     projector.add(positions)
+
+    end = datetime.datetime.now()
+    maptime = end - start
+    print("Done.", flush=True)
+
+    print("Save to file.", flush=True)
+
     np.save(map_output, projector.maps)
+
+    print("Load time: {}".format(loadtime))
+    print("Mapping time: {}".format(maptime))
 
     return
 
@@ -172,8 +205,14 @@ if __name__ == "__main__":
         zmax = 1.0,
         dx = 200.0,
         window_type='tophat',
-        snap_input='tests/tmp_pos.npy',
-        map_output='tests/tmp_map.npy'
+        snap_input='/mnt/data/suc/tmp_pos_832.npy',
+        map_output='../tests/tmp_map.npy'
     )
 
-    
+    # matter, zb = gen_lognormal_fields(example_config)
+    # zb_tbr = get_replaced_zs(zb, example_config)
+    # print(np.array([z2d(izb, 0.2) for izb in zb]))
+    # print(np.array([z2d(izb_tbr, 0.2) for izb_tbr in zb_tbr]))
+    # print(z2d(0.3, 0.2))
+
+    # make_mass_shells(zb=np.linspace(0.25, 0.35, 7), config=example_config)
